@@ -56,11 +56,47 @@ const registrarUsuario = async (req, res) => {
             });
         }
 
-        if (clave.length < 4) {
-            return res.status(400).json({
-                mensaje: "La clave debe tener al menos 4 caracteres"
-            });
-        }
+        const regexSoloLetras = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/;
+const regexTelefono = /^09[0-9]{8}$/;
+const regexCorreo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const regexUsuario = /^[A-Za-z0-9]{1,10}$/;
+const regexClave = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=.,;:¿?¡])[A-Za-z\d!@#$%^&*()_\-+=.,;:¿?¡]{6,}$/;
+
+if (!regexSoloLetras.test(nombre)) {
+    return res.status(400).json({
+        mensaje: "El nombre solo debe contener letras y espacios"
+    });
+}
+
+if (!regexSoloLetras.test(apellido)) {
+    return res.status(400).json({
+        mensaje: "El apellido solo debe contener letras y espacios"
+    });
+}
+
+if (!regexTelefono.test(telefono)) {
+    return res.status(400).json({
+        mensaje: "El teléfono debe empezar con 09 y tener exactamente 10 dígitos"
+    });
+}
+
+if (!regexCorreo.test(correo)) {
+    return res.status(400).json({
+        mensaje: "Ingrese un correo electrónico válido"
+    });
+}
+
+if (!regexUsuario.test(usuario)) {
+    return res.status(400).json({
+        mensaje: "El usuario debe tener máximo 10 caracteres y solo puede contener letras y números"
+    });
+}
+
+if (!regexClave.test(clave)) {
+    return res.status(400).json({
+        mensaje: "La clave debe tener mínimo 6 caracteres, una mayúscula, un número y un carácter especial"
+    });
+}
 
         const usuarioExistente = await pool.query(
             `SELECT * FROM usuarios
@@ -298,9 +334,11 @@ const restablecerClave = async (req, res) => {
             });
         }
 
-        if (nueva_clave.length < 4) {
-            return res.status(400).json({
-                mensaje: "La nueva clave debe tener al menos 4 caracteres"
+        const regexClave = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=.,;:¿?¡])[A-Za-z\d!@#$%^&*()_\-+=.,;:¿?¡]{6,}$/;
+
+            if (!regexClave.test(nueva_clave)) {
+                return res.status(400).json({
+            mensaje: "La nueva clave debe tener mínimo 6 caracteres, una mayúscula, un número y un carácter especial"
             });
         }
 
