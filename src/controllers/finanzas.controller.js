@@ -1,38 +1,50 @@
 const pool = require("../config/db");
 
+const {
+    generarEgresosRecurrentesDelMes
+} = require("./cuentasPagar.controller");
+
 const obtenerResumenFinanciero = async (req, res) => {
+    const client = await pool.connect();
+
     try {
-        const ingresos = await pool.query(
+        await client.query("BEGIN");
+
+        await generarEgresosRecurrentesDelMes(client);
+
+        const ingresos = await client.query(
             `SELECT COALESCE(SUM(valor), 0) AS total
              FROM movimientos_financieros
              WHERE tipo = 'Ingreso'`
         );
 
-        const egresos = await pool.query(
+        const egresos = await client.query(
             `SELECT COALESCE(SUM(valor), 0) AS total
              FROM movimientos_financieros
              WHERE tipo = 'Egreso'`
         );
 
-        const cuentasCobrar = await pool.query(
+        const cuentasCobrar = await client.query(
             `SELECT COALESCE(SUM(valor_pendiente), 0) AS total
              FROM cuentas_cobrar
              WHERE estado = 'Pendiente'`
         );
 
-        const citasHoy = await pool.query(
+        const citasHoy = await client.query(
             `SELECT COUNT(*) AS total
              FROM citas
              WHERE fecha = CURRENT_DATE
              AND estado = 'En curso'`
         );
 
-        const clientes = await pool.query(
+        const clientes = await client.query(
             `SELECT COUNT(*) AS total
              FROM usuarios
              WHERE rol = 'cliente'
              AND estado = TRUE`
         );
+
+        await client.query("COMMIT");
 
         const totalIngresos = Number(ingresos.rows[0].total);
         const totalEgresos = Number(egresos.rows[0].total);
@@ -50,20 +62,33 @@ const obtenerResumenFinanciero = async (req, res) => {
         });
 
     } catch (error) {
+        await client.query("ROLLBACK");
+
         console.error("Error al obtener resumen financiero:", error);
 
         res.status(500).json({
             mensaje: "Error al obtener resumen financiero",
             error: error.message
         });
+
+    } finally {
+        client.release();
     }
 };
 
 const listarMovimientos = async (req, res) => {
+    const client = await pool.connect();
+
     try {
-        const resultado = await pool.query(
+        await client.query("BEGIN");
+
+        await generarEgresosRecurrentesDelMes(client);
+
+        const resultado = await client.query(
             "SELECT * FROM movimientos_financieros ORDER BY fecha_registro DESC"
         );
+
+        await client.query("COMMIT");
 
         res.json({
             mensaje: "Movimientos financieros consultados correctamente",
@@ -72,12 +97,17 @@ const listarMovimientos = async (req, res) => {
         });
 
     } catch (error) {
+        await client.query("ROLLBACK");
+
         console.error("Error al listar movimientos financieros:", error);
 
         res.status(500).json({
             mensaje: "Error al listar movimientos financieros",
             error: error.message
         });
+
+    } finally {
+        client.release();
     }
 };
 
