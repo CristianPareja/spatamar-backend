@@ -141,23 +141,85 @@ const registrarCita = async (req, res) => {
     }
 };
 
+const obtenerServicioDeLaCita = async (client, cita) => {
+    let servicioResultado;
+
+    if (cita.id_servicio) {
+        servicioResultado = await client.query(
+            `SELECT * FROM servicios
+             WHERE id_servicio = $1`,
+            [cita.id_servicio]
+        );
+
+        if (servicioResultado.rows.length > 0) {
+            return servicioResultado.rows[0];
+        }
+    }
+
+    servicioResultado = await client.query(
+        `SELECT * FROM servicios
+         WHERE LOWER(nombre) = LOWER($1)
+         LIMIT 1`,
+        [cita.servicio]
+    );
+
+    if (servicioResultado.rows.length > 0) {
+        return servicioResultado.rows[0];
+    }
+
+    return null;
+};
+
+const obtenerCorreoCliente = async (client, cita) => {
+    if (!cita.id_usuario) {
+        return "cliente_no_registrado@spatamar.local";
+    }
+
+    const usuarioResultado = await client.query(
+        `SELECT correo
+         FROM usuarios
+         WHERE id_usuario = $1`,
+        [cita.id_usuario]
+    );
+
+    if (usuarioResultado.rows.length === 0) {
+        return "cliente_no_registrado@spatamar.local";
+    }
+
+    return usuarioResultado.rows[0].correo;
+};
+
 const finalizarCita = async (req, res) => {
+    const client = await pool.connect();
+
     try {
         const { id } = req.params;
         const { valor_cobrado } = req.body;
 
-        if (valor_cobrado === undefined || Number(valor_cobrado) <= 0) {
+        if (valor_cobrado === undefined || valor_cobrado === null || valor_cobrado === "") {
             return res.status(400).json({
-                mensaje: "Debe ingresar un valor cobrado válido"
+                mensaje: "Debe ingresar el valor pagado por el cliente"
             });
         }
 
-        const citaExiste = await pool.query(
+        const valorPagado = Number(valor_cobrado);
+
+        if (Number.isNaN(valorPagado) || valorPagado < 0) {
+            return res.status(400).json({
+                mensaje: "El valor pagado debe ser un número válido igual o mayor a cero"
+            });
+        }
+
+        await client.query("BEGIN");
+
+        const citaExiste = await client.query(
             "SELECT * FROM citas WHERE id_cita = $1",
             [id]
         );
 
         if (citaExiste.rows.length === 0) {
+            await client.query("ROLLBACK");
+
             return res.status(404).json({
                 mensaje: "Cita no encontrada"
             });
@@ -166,44 +228,117 @@ const finalizarCita = async (req, res) => {
         const cita = citaExiste.rows[0];
 
         if (cita.estado !== "En curso") {
+            await client.query("ROLLBACK");
+
             return res.status(400).json({
                 mensaje: "Solo se pueden finalizar citas en curso"
             });
         }
 
-        const citaActualizada = await pool.query(
-            `UPDATE citas
-             SET estado = 'Finalizado'
-             WHERE id_cita = $1
-             RETURNING *`,
-            [id]
-        );
+        const servicioEncontrado = await obtenerServicioDeLaCita(client, cita);
 
-        const movimiento = await pool.query(
-            `INSERT INTO movimientos_financieros
-            (tipo, categoria, concepto, fecha, valor, referencia, observacion)
-            VALUES ('Ingreso', 'Cita finalizada', $1, CURRENT_DATE, $2, $3, 'Ingreso registrado al finalizar cita')
-            RETURNING *`,
+        if (!servicioEncontrado) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                mensaje: "No se encontró el servicio asociado a la cita"
+            });
+        }
+
+        const precioServicio = Number(servicioEncontrado.precio);
+
+        if (valorPagado > precioServicio) {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                mensaje: "El valor pagado no puede ser mayor al precio del servicio"
+            });
+        }
+
+        const saldoPendiente = Number((precioServicio - valorPagado).toFixed(2));
+
+        const citaActualizada = await client.query(
+            `UPDATE citas
+             SET estado = 'Finalizado',
+                 precio_servicio = $1,
+                 valor_pagado = $2,
+                 saldo_pendiente = $3
+             WHERE id_cita = $4
+             RETURNING *`,
             [
-                cita.servicio,
-                valor_cobrado,
-                cita.nombre_cliente
+                precioServicio,
+                valorPagado,
+                saldoPendiente,
+                id
             ]
         );
 
+        let movimiento = null;
+
+        if (valorPagado > 0) {
+            const movimientoResultado = await client.query(
+                `INSERT INTO movimientos_financieros
+                (tipo, categoria, concepto, fecha, valor, referencia, observacion)
+                VALUES ('Ingreso', 'Cita finalizada', $1, CURRENT_DATE, $2, $3, $4)
+                RETURNING *`,
+                [
+                    cita.servicio,
+                    valorPagado,
+                    cita.nombre_cliente,
+                    "Ingreso registrado automáticamente al finalizar cita"
+                ]
+            );
+
+            movimiento = movimientoResultado.rows[0];
+        }
+
+        let cuentaCobrar = null;
+
+        if (saldoPendiente > 0) {
+            const correoCliente = await obtenerCorreoCliente(client, cita);
+
+            const cuentaResultado = await client.query(
+                `INSERT INTO cuentas_cobrar
+                (id_usuario, nombre_cliente, correo_cliente, concepto, fecha, valor_pendiente, estado, observacion)
+                VALUES ($1, $2, $3, $4, CURRENT_DATE, $5, 'Pendiente', $6)
+                RETURNING *`,
+                [
+                    cita.id_usuario || null,
+                    cita.nombre_cliente,
+                    correoCliente,
+                    "Saldo pendiente por servicio: " + cita.servicio,
+                    saldoPendiente,
+                    "Cuenta por cobrar generada automáticamente al finalizar una cita con pago parcial"
+                ]
+            );
+
+            cuentaCobrar = cuentaResultado.rows[0];
+        }
+
+        await client.query("COMMIT");
+
         res.json({
-            mensaje: "Cita finalizada e ingreso registrado correctamente",
+            mensaje: "Cita finalizada correctamente",
             cita: citaActualizada.rows[0],
-            movimiento: movimiento.rows[0]
+            precio_servicio: precioServicio,
+            valor_pagado: valorPagado,
+            saldo_pendiente: saldoPendiente,
+            movimiento: movimiento,
+            cuenta_cobrar: cuentaCobrar
         });
 
     } catch (error) {
+        await client.query("ROLLBACK");
+
         console.error("Error al finalizar cita:", error);
 
         res.status(500).json({
             mensaje: "Error al finalizar cita",
             error: error.message
         });
+
+    } finally {
+        client.release();
     }
 };
 
@@ -252,6 +387,7 @@ const cancelarCita = async (req, res) => {
         });
     }
 };
+
 const listarCitasPorUsuario = async (req, res) => {
     try {
         const { id_usuario } = req.params;
@@ -279,6 +415,7 @@ const listarCitasPorUsuario = async (req, res) => {
         });
     }
 };
+
 module.exports = {
     listarCitas,
     listarCitasPorFecha,

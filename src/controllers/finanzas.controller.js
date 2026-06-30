@@ -44,12 +44,81 @@ const obtenerResumenFinanciero = async (req, res) => {
              AND estado = TRUE`
         );
 
+        const servicioMasUtilizado = await client.query(
+            `SELECT 
+                servicio,
+                COUNT(*) AS total_usos
+             FROM citas
+             WHERE estado = 'Finalizado'
+             GROUP BY servicio
+             ORDER BY total_usos DESC, servicio ASC
+             LIMIT 1`
+        );
+
+        const servicioMenosUtilizado = await client.query(
+            `SELECT 
+                servicio,
+                COUNT(*) AS total_usos
+             FROM citas
+             WHERE estado = 'Finalizado'
+             GROUP BY servicio
+             ORDER BY total_usos ASC, servicio ASC
+             LIMIT 1`
+        );
+
+        const servicioMayorIngreso = await client.query(
+            `SELECT 
+                servicio,
+                COALESCE(SUM(valor_pagado), 0) AS total_ingresos
+             FROM citas
+             WHERE estado = 'Finalizado'
+             GROUP BY servicio
+             ORDER BY total_ingresos DESC, servicio ASC
+             LIMIT 1`
+        );
+
         await client.query("COMMIT");
 
         const totalIngresos = Number(ingresos.rows[0].total);
         const totalEgresos = Number(egresos.rows[0].total);
         const totalPorCobrar = Number(cuentasCobrar.rows[0].total);
         const gananciaNeta = totalIngresos - totalEgresos;
+
+        let servicioMasUtilizadoRespuesta = {
+            nombre: "Sin datos",
+            total_usos: 0
+        };
+
+        if (servicioMasUtilizado.rows.length > 0) {
+            servicioMasUtilizadoRespuesta = {
+                nombre: servicioMasUtilizado.rows[0].servicio,
+                total_usos: Number(servicioMasUtilizado.rows[0].total_usos)
+            };
+        }
+
+        let servicioMenosUtilizadoRespuesta = {
+            nombre: "Sin datos",
+            total_usos: 0
+        };
+
+        if (servicioMenosUtilizado.rows.length > 0) {
+            servicioMenosUtilizadoRespuesta = {
+                nombre: servicioMenosUtilizado.rows[0].servicio,
+                total_usos: Number(servicioMenosUtilizado.rows[0].total_usos)
+            };
+        }
+
+        let servicioMayorIngresoRespuesta = {
+            nombre: "Sin datos",
+            total_ingresos: 0
+        };
+
+        if (servicioMayorIngreso.rows.length > 0) {
+            servicioMayorIngresoRespuesta = {
+                nombre: servicioMayorIngreso.rows[0].servicio,
+                total_ingresos: Number(servicioMayorIngreso.rows[0].total_ingresos)
+            };
+        }
 
         res.json({
             mensaje: "Resumen financiero consultado correctamente",
@@ -58,7 +127,12 @@ const obtenerResumenFinanciero = async (req, res) => {
             ganancia_neta: gananciaNeta,
             total_por_cobrar: totalPorCobrar,
             citas_hoy: Number(citasHoy.rows[0].total),
-            clientes_registrados: Number(clientes.rows[0].total)
+            clientes_registrados: Number(clientes.rows[0].total),
+            estadisticas_servicios: {
+                servicio_mas_utilizado: servicioMasUtilizadoRespuesta,
+                servicio_menos_utilizado: servicioMenosUtilizadoRespuesta,
+                servicio_mayor_ingreso: servicioMayorIngresoRespuesta
+            }
         });
 
     } catch (error) {
