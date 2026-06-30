@@ -76,17 +76,17 @@ const obtenerResumenFinanciero = async (req, res) => {
              ORDER BY total_ingresos DESC, servicio ASC
              LIMIT 1`
         );
-        
+
         const rankingServicios = await client.query(
             `SELECT 
                 servicio,
                 COUNT(*) AS total_usos,
                 COALESCE(SUM(valor_pagado), 0) AS total_ingresos
-            FROM citas
-            WHERE estado = 'Finalizado'
-            GROUP BY servicio
-            ORDER BY total_ingresos DESC, servicio ASC`
-);
+             FROM citas
+             WHERE estado = 'Finalizado'
+             GROUP BY servicio
+             ORDER BY total_ingresos DESC, servicio ASC`
+        );
 
         await client.query("COMMIT");
 
@@ -131,6 +131,14 @@ const obtenerResumenFinanciero = async (req, res) => {
             };
         }
 
+        const rankingServiciosRespuesta = rankingServicios.rows.map(servicio => {
+            return {
+                servicio: servicio.servicio,
+                total_usos: Number(servicio.total_usos),
+                total_ingresos: Number(servicio.total_ingresos)
+            };
+        });
+
         res.json({
             mensaje: "Resumen financiero consultado correctamente",
             ingresos: totalIngresos,
@@ -142,7 +150,8 @@ const obtenerResumenFinanciero = async (req, res) => {
             estadisticas_servicios: {
                 servicio_mas_utilizado: servicioMasUtilizadoRespuesta,
                 servicio_menos_utilizado: servicioMenosUtilizadoRespuesta,
-                servicio_mayor_ingreso: servicioMayorIngresoRespuesta
+                servicio_mayor_ingreso: servicioMayorIngresoRespuesta,
+                ranking_servicios: rankingServiciosRespuesta
             }
         });
 
