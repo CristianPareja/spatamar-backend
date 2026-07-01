@@ -11,6 +11,8 @@ const cuentasCobrarRoutes = require("./src/routes/cuentasCobrar.routes");
 const cuentasPagarRoutes = require("./src/routes/cuentasPagar.routes");
 const finanzasRoutes = require("./src/routes/finanzas.routes");
 
+const { verificarConfiguracionCorreo } = require("./src/config/email");
+
 const app = express();
 
 app.use(cors());
@@ -60,6 +62,8 @@ app.use("/api/finanzas", finanzasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", async () => {
     console.log("Servidor Spa TAMAR ejecutandose en el puerto " + PORT);
+
+    await verificarConfiguracionCorreo();
 });
