@@ -431,5 +431,6 @@ const obtenerResumenFinancieroMensual = async (req, res) => {
 };
 module.exports = {
     obtenerResumenFinanciero,
+    obtenerResumenFinancieroMensual,
     listarMovimientos
 };
