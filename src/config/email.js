@@ -1,5 +1,9 @@
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 require("dotenv").config();
+
+// Forzar prioridad IPv4 para evitar error ENETUNREACH con IPv6 en Render
+dns.setDefaultResultOrder("ipv4first");
 
 const crearTransporter = () => {
     const emailHost = process.env.EMAIL_HOST || "smtp.gmail.com";
