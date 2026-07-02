@@ -111,16 +111,9 @@ const registrarCita = async (req, res) => {
         [fecha, hora]
 );
 
-if (cruce.rows.length > 0) {
-    return res.status(409).json({
-        mensaje: "No se puede agendar la cita porque existe otra cita activa dentro del rango de 58 minutos antes o 58 minutos después.",
-        cita_existente: cruce.rows[0]
-    });
-}
-
     if (cruce.rows.length > 0) {
         return res.status(409).json({
-            mensaje: "No se puede agendar la cita porque existe otra cita dentro del rango de una hora antes o una hora después.",
+            mensaje: "No se puede agendar la cita porque existe otra cita activa dentro del rango de 58 minutos antes o 58 minutos después.",
             cita_existente: cruce.rows[0]
         });
 }
