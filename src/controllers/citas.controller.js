@@ -100,22 +100,36 @@ const registrarCita = async (req, res) => {
             id_cita,
             nombre_cliente,
             servicio,
+            fecha,
             hora,
-            estado
+            estado,
+            ABS(
+                EXTRACT(
+                    EPOCH FROM (
+                        (fecha + hora) - ($1::date + $2::time)
+                    )
+                ) / 60
+            ) AS diferencia_minutos
         FROM citas
         WHERE fecha = $1
-        AND LOWER(estado) = 'en curso'
-        AND hora BETWEEN ($2::time - INTERVAL '58 minutes')
-                AND ($2::time + INTERVAL '58 minutes')
+        AND TRIM(LOWER(estado)) = 'en curso'
+        AND ABS(
+            EXTRACT(
+                EPOCH FROM (
+                    (fecha + hora) - ($1::date + $2::time)
+                )
+            ) / 60
+        ) <= 58
+        ORDER BY diferencia_minutos ASC
         LIMIT 1`,
         [fecha, hora]
 );
 
-    if (cruce.rows.length > 0) {
-        return res.status(409).json({
-            mensaje: "No se puede agendar la cita porque existe otra cita activa dentro del rango de 58 minutos antes o 58 minutos después.",
-            cita_existente: cruce.rows[0]
-        });
+if (cruce.rows.length > 0) {
+    return res.status(409).json({
+        mensaje: "No se puede agendar la cita porque existe otra cita activa",
+        cita_existente: cruce.rows[0]
+    });
 }
 
         const resultado = await pool.query(
