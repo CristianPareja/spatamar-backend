@@ -80,7 +80,10 @@ const listarCuentasPagar = async (req, res) => {
         await generarEgresosRecurrentesDelMes(client);
 
         const resultado = await client.query(
-            "SELECT * FROM cuentas_pagar ORDER BY fecha_registro DESC"
+        `SELECT *
+        FROM cuentas_pagar
+        WHERE estado <> 'Eliminado'
+        ORDER BY fecha_registro DESC`
         );
 
         await client.query("COMMIT");
@@ -465,6 +468,83 @@ const cambiarEstadoEgresoRecurrente = async (req, res) => {
     }
 };
 
+const eliminarCuentaPagar = async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const { id } = req.params;
+
+        await client.query("BEGIN");
+
+        const cuentaExistente = await client.query(
+            `SELECT *
+             FROM cuentas_pagar
+             WHERE id_cuenta_pagar = $1`,
+            [id]
+        );
+
+        if (cuentaExistente.rows.length === 0) {
+            await client.query("ROLLBACK");
+
+            return res.status(404).json({
+                mensaje: "No se encontró el egreso"
+            });
+        }
+
+        const cuenta = cuentaExistente.rows[0];
+
+        if (cuenta.estado === "Eliminado") {
+            await client.query("ROLLBACK");
+
+            return res.status(400).json({
+                mensaje: "El egreso ya se encuentra eliminado"
+            });
+        }
+
+        await client.query(
+            `UPDATE cuentas_pagar
+             SET estado = 'Eliminado',
+                 observacion = COALESCE(observacion, '') || ' | Egreso eliminado por administrador'
+             WHERE id_cuenta_pagar = $1`,
+            [id]
+        );
+
+        if (cuenta.id_movimiento) {
+            await client.query(
+                `DELETE FROM movimientos_financieros
+                 WHERE id_movimiento = $1`,
+                [cuenta.id_movimiento]
+            );
+
+            await client.query(
+                `UPDATE cuentas_pagar
+                 SET id_movimiento = NULL
+                 WHERE id_cuenta_pagar = $1`,
+                [id]
+            );
+        }
+
+        await client.query("COMMIT");
+
+        res.json({
+            mensaje: "Egreso eliminado correctamente. Ya no afectará la utilidad.",
+            cuenta_eliminada: cuenta
+        });
+
+    } catch (error) {
+        await client.query("ROLLBACK");
+
+        console.error("Error al eliminar egreso:", error);
+
+        res.status(500).json({
+            mensaje: "Error al eliminar egreso",
+            error: error.message
+        });
+
+    } finally {
+        client.release();
+    }
+};
 module.exports = {
     listarCuentasPagar,
     listarEgresosRecurrentes,
@@ -472,5 +552,6 @@ module.exports = {
     registrarEgresoRecurrente,
     actualizarCuentaPagar,
     cambiarEstadoEgresoRecurrente,
+    eliminarCuentaPagar,
     generarEgresosRecurrentesDelMes
 };
