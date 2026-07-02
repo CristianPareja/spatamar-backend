@@ -501,34 +501,34 @@ const eliminarCuentaPagar = async (req, res) => {
             });
         }
 
-        await client.query(
+        const cuentaEliminada = await client.query(
             `UPDATE cuentas_pagar
              SET estado = 'Eliminado',
                  observacion = COALESCE(observacion, '') || ' | Egreso eliminado por administrador'
-             WHERE id_cuenta_pagar = $1`,
+             WHERE id_cuenta_pagar = $1
+             RETURNING *`,
             [id]
         );
 
-        if (cuenta.id_movimiento) {
-            await client.query(
-                `DELETE FROM movimientos_financieros
-                 WHERE id_movimiento = $1`,
-                [cuenta.id_movimiento]
-            );
+        let movimientoAnulado = null;
 
-            await client.query(
-                `UPDATE cuentas_pagar
-                 SET id_movimiento = NULL
-                 WHERE id_cuenta_pagar = $1`,
-                [id]
+        if (cuenta.id_movimiento) {
+            movimientoAnulado = await client.query(
+                `UPDATE movimientos_financieros
+                 SET valor = 0,
+                     observacion = COALESCE(observacion, '') || ' | Movimiento anulado por eliminación de egreso'
+                 WHERE id_movimiento = $1
+                 RETURNING *`,
+                [cuenta.id_movimiento]
             );
         }
 
         await client.query("COMMIT");
 
         res.json({
-            mensaje: "Egreso eliminado correctamente. Ya no afectará la utilidad.",
-            cuenta_eliminada: cuenta
+            mensaje: "Egreso eliminado correctamente",
+            cuenta: cuentaEliminada.rows[0],
+            movimiento: movimientoAnulado ? movimientoAnulado.rows[0] : null
         });
 
     } catch (error) {
