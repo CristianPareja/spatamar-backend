@@ -96,18 +96,26 @@ const registrarCita = async (req, res) => {
         }
 
         const cruce = await pool.query(
-            `SELECT id_cita FROM citas
-             WHERE fecha = $1
-             AND hora = $2
-             AND estado = 'En curso'`,
-            [fecha, hora]
-        );
+        `SELECT 
+            id_cita,
+            nombre_cliente,
+            servicio,
+            hora
+        FROM citas
+        WHERE fecha = $1
+        AND estado = 'En curso'
+        AND hora BETWEEN ($2::time - INTERVAL '1 hour')
+                  AND ($2::time + INTERVAL '1 hour')
+        LIMIT 1`,
+        [fecha, hora]
+    );
 
-        if (cruce.rows.length > 0) {
-            return res.status(409).json({
-                mensaje: "Ya existe una cita registrada en esa fecha y hora"
-            });
-        }
+    if (cruce.rows.length > 0) {
+        return res.status(409).json({
+            mensaje: "No se puede agendar la cita porque existe otra cita dentro del rango de una hora antes o una hora después.",
+            cita_existente: cruce.rows[0]
+        });
+}
 
         const resultado = await pool.query(
             `INSERT INTO citas
