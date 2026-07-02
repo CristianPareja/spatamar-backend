@@ -100,15 +100,23 @@ const registrarCita = async (req, res) => {
             id_cita,
             nombre_cliente,
             servicio,
-            hora
+            hora,
+            estado
         FROM citas
         WHERE fecha = $1
-        AND estado = 'En curso'
-        AND hora BETWEEN ($2::time - INTERVAL '1 hour')
-                  AND ($2::time + INTERVAL '1 hour')
+        AND LOWER(estado) = 'en curso'
+        AND hora BETWEEN ($2::time - INTERVAL '58 minutes')
+                AND ($2::time + INTERVAL '58 minutes')
         LIMIT 1`,
         [fecha, hora]
-    );
+);
+
+if (cruce.rows.length > 0) {
+    return res.status(409).json({
+        mensaje: "No se puede agendar la cita porque existe otra cita activa dentro del rango de 58 minutos antes o 58 minutos después.",
+        cita_existente: cruce.rows[0]
+    });
+}
 
     if (cruce.rows.length > 0) {
         return res.status(409).json({
