@@ -62,8 +62,27 @@ app.use("/api/finanzas", finanzasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, "0.0.0.0", async () => {
-    console.log("Servidor Spa TAMAR ejecutandose en el puerto " + PORT);
+/*
+    Esta condición permite que el servidor se levante normalmente
+    cuando se ejecuta con npm start o en Render.
 
-    await verificarConfiguracionCorreo();
-});
+    Pero cuando se ejecuten pruebas con Jest y Supertest,
+    NODE_ENV será "test", por lo tanto no se ejecutará app.listen().
+*/
+if (process.env.NODE_ENV !== "test") {
+    app.listen(PORT, "0.0.0.0", async () => {
+        console.log("Servidor Spa TAMAR ejecutandose en el puerto " + PORT);
+
+        try {
+            await verificarConfiguracionCorreo();
+        } catch (error) {
+            console.error("Error al verificar la configuracion del correo:", error.message);
+        }
+    });
+}
+
+/*
+    Exportamos app para que Supertest pueda usar el backend
+    durante las pruebas automatizadas.
+*/
+module.exports = app;

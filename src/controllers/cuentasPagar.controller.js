@@ -21,15 +21,18 @@ const generarEgresosRecurrentesDelMes = async (client) => {
     const mesActual = obtenerMesActual();
 
     const recurrentes = await client.query(
-        `SELECT * FROM egresos_recurrentes
+        `SELECT *
+         FROM egresos_recurrentes
          WHERE activo = TRUE`
     );
 
     for (const recurrente of recurrentes.rows) {
         const existeCuenta = await client.query(
-            `SELECT * FROM cuentas_pagar
+            `SELECT *
+             FROM cuentas_pagar
              WHERE id_recurrente = $1
-             AND mes_aplicado = $2`,
+             AND mes_aplicado = $2
+             AND COALESCE(estado, '') <> 'Eliminado'`,
             [
                 recurrente.id_recurrente,
                 mesActual
@@ -80,10 +83,10 @@ const listarCuentasPagar = async (req, res) => {
         await generarEgresosRecurrentesDelMes(client);
 
         const resultado = await client.query(
-        `SELECT *
-        FROM cuentas_pagar
-        WHERE estado <> 'Eliminado'
-        ORDER BY fecha_registro DESC`
+            `SELECT *
+             FROM cuentas_pagar
+             WHERE COALESCE(estado, '') <> 'Eliminado'
+             ORDER BY fecha DESC, id_cuenta_pagar DESC`
         );
 
         await client.query("COMMIT");
@@ -112,7 +115,9 @@ const listarCuentasPagar = async (req, res) => {
 const listarEgresosRecurrentes = async (req, res) => {
     try {
         const resultado = await pool.query(
-            "SELECT * FROM egresos_recurrentes ORDER BY fecha_registro DESC"
+            `SELECT *
+             FROM egresos_recurrentes
+             ORDER BY fecha_registro DESC`
         );
 
         res.json({
@@ -331,7 +336,10 @@ const actualizarCuentaPagar = async (req, res) => {
         await client.query("BEGIN");
 
         const cuentaExistente = await client.query(
-            "SELECT * FROM cuentas_pagar WHERE id_cuenta_pagar = $1",
+            `SELECT *
+             FROM cuentas_pagar
+             WHERE id_cuenta_pagar = $1
+             AND COALESCE(estado, '') <> 'Eliminado'`,
             [id]
         );
 
@@ -413,7 +421,7 @@ const actualizarCuentaPagar = async (req, res) => {
         res.json({
             mensaje: "Cuenta por pagar actualizada correctamente",
             cuenta: cuentaActualizada.rows[0],
-            movimiento: movimientoActualizado.rows[0]
+            movimiento: movimientoActualizado ? movimientoActualizado.rows[0] : null
         });
 
     } catch (error) {
@@ -474,6 +482,12 @@ const eliminarCuentaPagar = async (req, res) => {
     try {
         const { id } = req.params;
 
+        if (!id) {
+            return res.status(400).json({
+                mensaje: "El id del egreso es obligatorio"
+            });
+        }
+
         await client.query("BEGIN");
 
         const cuentaExistente = await client.query(
@@ -501,25 +515,26 @@ const eliminarCuentaPagar = async (req, res) => {
             });
         }
 
+        const idMovimiento = cuenta.id_movimiento;
+
         const cuentaEliminada = await client.query(
             `UPDATE cuentas_pagar
              SET estado = 'Eliminado',
-                 observacion = COALESCE(observacion, '') || ' | Egreso eliminado por administrador'
+                 observacion = COALESCE(observacion, '') || ' | Egreso eliminado por administrador',
+                 id_movimiento = NULL
              WHERE id_cuenta_pagar = $1
              RETURNING *`,
             [id]
         );
 
-        let movimientoAnulado = null;
+        let movimientoEliminado = null;
 
-        if (cuenta.id_movimiento) {
-            movimientoAnulado = await client.query(
-                `UPDATE movimientos_financieros
-                 SET valor = 0,
-                     observacion = COALESCE(observacion, '') || ' | Movimiento anulado por eliminación de egreso'
+        if (idMovimiento) {
+            movimientoEliminado = await client.query(
+                `DELETE FROM movimientos_financieros
                  WHERE id_movimiento = $1
                  RETURNING *`,
-                [cuenta.id_movimiento]
+                [idMovimiento]
             );
         }
 
@@ -528,7 +543,9 @@ const eliminarCuentaPagar = async (req, res) => {
         res.json({
             mensaje: "Egreso eliminado correctamente",
             cuenta: cuentaEliminada.rows[0],
-            movimiento: movimientoAnulado ? movimientoAnulado.rows[0] : null
+            movimiento_eliminado: movimientoEliminado && movimientoEliminado.rows.length > 0
+                ? movimientoEliminado.rows[0]
+                : null
         });
 
     } catch (error) {
@@ -545,6 +562,7 @@ const eliminarCuentaPagar = async (req, res) => {
         client.release();
     }
 };
+
 module.exports = {
     listarCuentasPagar,
     listarEgresosRecurrentes,
