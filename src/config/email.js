@@ -1,7 +1,5 @@
 const nodemailer = require("nodemailer");
-const dns = require("dns");
-
-dns.setDefaultResultOrder("ipv4first");
+const dns = require("dns").promises;
 
 const EMAIL_HOST = process.env.EMAIL_HOST || "smtp.gmail.com";
 const EMAIL_PORT = Number(process.env.EMAIL_PORT || 465);
@@ -9,21 +7,33 @@ const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 const EMAIL_FROM = process.env.EMAIL_FROM || `Spa TAMAR <${EMAIL_USER}>`;
 
-const crearTransporter = () => {
+const obtenerIpV4Correo = async () => {
+    const resultado = await dns.lookup(EMAIL_HOST, {
+        family: 4
+    });
+
+    return resultado.address;
+};
+
+const crearTransporter = async () => {
+    const ipV4 = await obtenerIpV4Correo();
+
+    console.log("SMTP Gmail IPv4 usado:", ipV4);
+
     return nodemailer.createTransport({
-        host: EMAIL_HOST,
+        host: ipV4,
         port: EMAIL_PORT,
         secure: EMAIL_PORT === 465,
         auth: {
             user: EMAIL_USER,
             pass: EMAIL_PASS
         },
-        family: 4,
         connectionTimeout: 20000,
         greetingTimeout: 20000,
         socketTimeout: 20000,
         tls: {
-            servername: EMAIL_HOST
+            servername: EMAIL_HOST,
+            rejectUnauthorized: true
         }
     });
 };
@@ -37,7 +47,7 @@ const verificarConfiguracionCorreo = async () => {
             };
         }
 
-        const transporter = crearTransporter();
+        const transporter = await crearTransporter();
 
         await transporter.verify();
 
@@ -45,7 +55,10 @@ const verificarConfiguracionCorreo = async () => {
 
         return {
             ok: true,
-            mensaje: "Configuracion de correo verificada correctamente"
+            mensaje: "Configuracion de correo verificada correctamente",
+            correo: EMAIL_USER,
+            host: EMAIL_HOST,
+            puerto: EMAIL_PORT
         };
 
     } catch (error) {
@@ -57,7 +70,10 @@ const verificarConfiguracionCorreo = async () => {
             error: error.message,
             codigo: error.code || null,
             comando: error.command || null,
-            respuesta: error.response || null
+            respuesta: error.response || null,
+            correo: EMAIL_USER || null,
+            host: EMAIL_HOST,
+            puerto: EMAIL_PORT
         };
     }
 };
@@ -72,7 +88,7 @@ const enviarCorreoRecuperacion = async (correoDestino, codigo) => {
             throw new Error("Correo destino y codigo son obligatorios");
         }
 
-        const transporter = crearTransporter();
+        const transporter = await crearTransporter();
 
         const opcionesCorreo = {
             from: EMAIL_FROM,
