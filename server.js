@@ -55,19 +55,23 @@ app.get("/api/prueba-db", async (req, res) => {
 
 app.get("/api/prueba-correo", async (req, res) => {
     try {
-        const verificado = await verificarConfiguracionCorreo();
+        const resultadoCorreo = await verificarConfiguracionCorreo();
 
-        if (!verificado) {
+        if (!resultadoCorreo.ok) {
             return res.status(500).json({
-                mensaje: "No se pudo verificar la configuracion de correo. Revise variables EMAIL_USER, EMAIL_PASS, EMAIL_HOST y EMAIL_PORT en Render."
+                mensaje: "No se pudo verificar la configuracion de correo",
+                detalle: resultadoCorreo
             });
         }
 
         res.json({
-            mensaje: "Configuracion de correo verificada correctamente"
+            mensaje: "Configuracion de correo verificada correctamente",
+            detalle: resultadoCorreo
         });
 
     } catch (error) {
+        console.error("Error en /api/prueba-correo:", error);
+
         res.status(500).json({
             mensaje: "Error al verificar configuracion de correo",
             error: error.message
@@ -88,7 +92,19 @@ if (process.env.NODE_ENV !== "test") {
     app.listen(PORT, "0.0.0.0", async () => {
         console.log("Servidor Spa TAMAR ejecutandose en el puerto " + PORT);
 
-        await verificarConfiguracionCorreo();
+        try {
+            const resultadoCorreo = await verificarConfiguracionCorreo();
+
+            if (resultadoCorreo.ok) {
+                console.log("Correo verificado al iniciar servidor");
+            } else {
+                console.log("Servidor iniciado, pero el correo no fue verificado");
+                console.log(resultadoCorreo);
+            }
+
+        } catch (error) {
+            console.error("Servidor iniciado, pero fallo la verificacion de correo:", error.message);
+        }
     });
 }
 
