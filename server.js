@@ -53,6 +53,28 @@ app.get("/api/prueba-db", async (req, res) => {
     }
 });
 
+app.get("/api/prueba-correo", async (req, res) => {
+    try {
+        const verificado = await verificarConfiguracionCorreo();
+
+        if (!verificado) {
+            return res.status(500).json({
+                mensaje: "No se pudo verificar la configuracion de correo. Revise variables EMAIL_USER, EMAIL_PASS, EMAIL_HOST y EMAIL_PORT en Render."
+            });
+        }
+
+        res.json({
+            mensaje: "Configuracion de correo verificada correctamente"
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            mensaje: "Error al verificar configuracion de correo",
+            error: error.message
+        });
+    }
+});
+
 app.use("/api/usuarios", usuariosRoutes);
 app.use("/api/servicios", serviciosRoutes);
 app.use("/api/citas", citasRoutes);
@@ -62,27 +84,12 @@ app.use("/api/finanzas", finanzasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
-/*
-    Esta condición permite que el servidor se levante normalmente
-    cuando se ejecuta con npm start o en Render.
-
-    Pero cuando se ejecuten pruebas con Jest y Supertest,
-    NODE_ENV será "test", por lo tanto no se ejecutará app.listen().
-*/
 if (process.env.NODE_ENV !== "test") {
     app.listen(PORT, "0.0.0.0", async () => {
         console.log("Servidor Spa TAMAR ejecutandose en el puerto " + PORT);
 
-        try {
-            await verificarConfiguracionCorreo();
-        } catch (error) {
-            console.error("Error al verificar la configuracion del correo:", error.message);
-        }
+        await verificarConfiguracionCorreo();
     });
 }
 
-/*
-    Exportamos app para que Supertest pueda usar el backend
-    durante las pruebas automatizadas.
-*/
 module.exports = app;

@@ -1,41 +1,17 @@
 const pool = require("../config/db");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
+const { enviarCorreoRecuperacion } = require("../config/email");
 
-const {
-    enviarCorreoRecuperacion
-} = require("../config/email");
+const generarUsuario = (nombre, apellido) => {
+    const nombreLimpio = nombre.toLowerCase().trim().replace(/\s+/g, "");
+    const apellidoLimpio = apellido.toLowerCase().trim().replace(/\s+/g, "");
+    const numero = Math.floor(100 + Math.random() * 900);
 
-const listarUsuarios = async (req, res) => {
-    try {
-        const resultado = await pool.query(
-            `SELECT 
-                id_usuario,
-                nombre,
-                apellido,
-                telefono,
-                correo,
-                usuario,
-                rol,
-                estado,
-                fecha_registro
-             FROM usuarios
-             ORDER BY fecha_registro DESC`
-        );
+    return nombreLimpio + "." + apellidoLimpio + numero;
+};
 
-        res.json({
-            mensaje: "Usuarios consultados correctamente",
-            total: resultado.rows.length,
-            usuarios: resultado.rows
-        });
-
-    } catch (error) {
-        console.error("Error al listar usuarios:", error);
-
-        res.status(500).json({
-            mensaje: "Error al listar usuarios",
-            error: error.message
-        });
-    }
+const generarCodigoRecuperacion = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 const registrarUsuario = async (req, res) => {
@@ -45,99 +21,44 @@ const registrarUsuario = async (req, res) => {
             apellido,
             telefono,
             correo,
-            usuario,
             clave,
             rol
         } = req.body;
 
-        if (!nombre || !apellido || !telefono || !correo || !usuario || !clave) {
+        if (!nombre || !apellido || !telefono || !correo || !clave) {
             return res.status(400).json({
-                mensaje: "Todos los campos obligatorios deben ser enviados"
+                mensaje: "Todos los campos son obligatorios"
             });
         }
 
-        const regexSoloLetras = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/;
-const regexTelefono = /^09[0-9]{8}$/;
-const regexCorreo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const regexUsuario = /^[A-Za-z0-9]{1,10}$/;
-const regexClave = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=.,;:¿?¡])[A-Za-z\d!@#$%^&*()_\-+=.,;:¿?¡]{6,}$/;
-
-if (!regexSoloLetras.test(nombre)) {
-    return res.status(400).json({
-        mensaje: "El nombre solo debe contener letras y espacios"
-    });
-}
-
-if (!regexSoloLetras.test(apellido)) {
-    return res.status(400).json({
-        mensaje: "El apellido solo debe contener letras y espacios"
-    });
-}
-
-if (!regexTelefono.test(telefono)) {
-    return res.status(400).json({
-        mensaje: "El teléfono debe empezar con 09 y tener exactamente 10 dígitos"
-    });
-}
-
-if (!regexCorreo.test(correo)) {
-    return res.status(400).json({
-        mensaje: "Ingrese un correo electrónico válido"
-    });
-}
-
-if (!regexUsuario.test(usuario)) {
-    return res.status(400).json({
-        mensaje: "El usuario debe tener máximo 10 caracteres y solo puede contener letras y números"
-    });
-}
-
-if (!regexClave.test(clave)) {
-    return res.status(400).json({
-        mensaje: "La clave debe tener mínimo 6 caracteres, una mayúscula, un número y un carácter especial"
-    });
-}
-
-        const usuarioExistente = await pool.query(
-            `SELECT * FROM usuarios
-             WHERE correo = $1 OR usuario = $2`,
-            [
-                correo,
-                usuario
-            ]
+        const existeCorreo = await pool.query(
+            "SELECT * FROM usuarios WHERE correo = $1",
+            [correo]
         );
 
-        if (usuarioExistente.rows.length > 0) {
+        if (existeCorreo.rows.length > 0) {
             return res.status(409).json({
-                mensaje: "El correo o usuario ya se encuentra registrado"
+                mensaje: "El correo ya se encuentra registrado"
             });
         }
 
-        const salt = await bcrypt.genSalt(10);
-        const claveHash = await bcrypt.hash(clave, salt);
+        const usuarioGenerado = generarUsuario(nombre, apellido);
+        const claveCifrada = await bcrypt.hash(clave, 10);
+        const rolFinal = rol || "cliente";
 
         const resultado = await pool.query(
             `INSERT INTO usuarios
             (nombre, apellido, telefono, correo, usuario, clave, rol, estado)
             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
-            RETURNING 
-                id_usuario,
-                nombre,
-                apellido,
-                telefono,
-                correo,
-                usuario,
-                rol,
-                estado,
-                fecha_registro`,
+            RETURNING id_usuario, nombre, apellido, telefono, correo, usuario, rol, estado, fecha_registro`,
             [
                 nombre,
                 apellido,
                 telefono,
                 correo,
-                usuario,
-                claveHash,
-                rol || "cliente"
+                usuarioGenerado,
+                claveCifrada,
+                rolFinal
             ]
         );
 
@@ -159,22 +80,21 @@ if (!regexClave.test(clave)) {
 const loginUsuario = async (req, res) => {
     try {
         const {
-            usuarioOCorreo,
+            usuario,
             clave
         } = req.body;
 
-        if (!usuarioOCorreo || !clave) {
+        if (!usuario || !clave) {
             return res.status(400).json({
-                mensaje: "Usuario/correo y clave son obligatorios"
+                mensaje: "Usuario y contraseña son obligatorios"
             });
         }
 
         const resultado = await pool.query(
-            `SELECT * FROM usuarios
+            `SELECT *
+             FROM usuarios
              WHERE usuario = $1 OR correo = $1`,
-            [
-                usuarioOCorreo
-            ]
+            [usuario]
         );
 
         if (resultado.rows.length === 0) {
@@ -185,47 +105,22 @@ const loginUsuario = async (req, res) => {
 
         const usuarioEncontrado = resultado.rows[0];
 
-        if (!usuarioEncontrado.estado) {
+        if (usuarioEncontrado.estado === false) {
             return res.status(403).json({
                 mensaje: "El usuario se encuentra inactivo"
             });
         }
 
-        let claveCorrecta = false;
+        const claveValida = await bcrypt.compare(clave, usuarioEncontrado.clave);
 
-        if (usuarioEncontrado.clave.startsWith("$2a$") ||
-            usuarioEncontrado.clave.startsWith("$2b$") ||
-            usuarioEncontrado.clave.startsWith("$2y$")) {
-
-            claveCorrecta = await bcrypt.compare(clave, usuarioEncontrado.clave);
-
-        } else {
-            claveCorrecta = clave === usuarioEncontrado.clave;
-
-            if (claveCorrecta) {
-                const salt = await bcrypt.genSalt(10);
-                const claveHash = await bcrypt.hash(clave, salt);
-
-                await pool.query(
-                    `UPDATE usuarios
-                     SET clave = $1
-                     WHERE id_usuario = $2`,
-                    [
-                        claveHash,
-                        usuarioEncontrado.id_usuario
-                    ]
-                );
-            }
-        }
-
-        if (!claveCorrecta) {
+        if (!claveValida) {
             return res.status(401).json({
                 mensaje: "Credenciales incorrectas"
             });
         }
 
         res.json({
-            mensaje: "Inicio de sesión correcto",
+            mensaje: "Inicio de sesion correcto",
             usuario: {
                 id_usuario: usuarioEncontrado.id_usuario,
                 nombre: usuarioEncontrado.nombre,
@@ -239,20 +134,129 @@ const loginUsuario = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error al iniciar sesión:", error);
+        console.error("Error al iniciar sesion:", error);
 
         res.status(500).json({
-            mensaje: "Error al iniciar sesión",
+            mensaje: "Error al iniciar sesion",
             error: error.message
         });
     }
 };
 
-const generarCodigoRecuperacion = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+const listarUsuarios = async (req, res) => {
+    try {
+        const resultado = await pool.query(
+            `SELECT id_usuario, nombre, apellido, telefono, correo, usuario, rol, estado, fecha_registro
+             FROM usuarios
+             ORDER BY fecha_registro DESC`
+        );
+
+        res.json({
+            mensaje: "Usuarios consultados correctamente",
+            total: resultado.rows.length,
+            usuarios: resultado.rows
+        });
+
+    } catch (error) {
+        console.error("Error al listar usuarios:", error);
+
+        res.status(500).json({
+            mensaje: "Error al listar usuarios",
+            error: error.message
+        });
+    }
 };
 
-const solicitarRecuperacionClave = async (req, res) => {
+const obtenerUsuarioPorId = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(
+            `SELECT id_usuario, nombre, apellido, telefono, correo, usuario, rol, estado, fecha_registro
+             FROM usuarios
+             WHERE id_usuario = $1`,
+            [id]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                mensaje: "Usuario no encontrado"
+            });
+        }
+
+        res.json({
+            mensaje: "Usuario consultado correctamente",
+            usuario: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Error al obtener usuario:", error);
+
+        res.status(500).json({
+            mensaje: "Error al obtener usuario",
+            error: error.message
+        });
+    }
+};
+
+const actualizarUsuario = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const {
+            nombre,
+            apellido,
+            telefono,
+            correo
+        } = req.body;
+
+        if (!nombre || !apellido || !telefono || !correo) {
+            return res.status(400).json({
+                mensaje: "Nombre, apellido, teléfono y correo son obligatorios"
+            });
+        }
+
+        const resultado = await pool.query(
+            `UPDATE usuarios
+             SET nombre = $1,
+                 apellido = $2,
+                 telefono = $3,
+                 correo = $4
+             WHERE id_usuario = $5
+             RETURNING id_usuario, nombre, apellido, telefono, correo, usuario, rol, estado, fecha_registro`,
+            [
+                nombre,
+                apellido,
+                telefono,
+                correo,
+                id
+            ]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                mensaje: "Usuario no encontrado"
+            });
+        }
+
+        res.json({
+            mensaje: "Usuario actualizado correctamente",
+            usuario: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Error al actualizar usuario:", error);
+
+        res.status(500).json({
+            mensaje: "Error al actualizar usuario",
+            error: error.message
+        });
+    }
+};
+
+const solicitarRecuperacion = async (req, res) => {
+    const client = await pool.connect();
+
     try {
         const { correo } = req.body;
 
@@ -262,27 +266,35 @@ const solicitarRecuperacionClave = async (req, res) => {
             });
         }
 
-        const usuarioResultado = await pool.query(
-            `SELECT * FROM usuarios
-             WHERE correo = $1
-             AND estado = TRUE`,
+        const usuarioResultado = await client.query(
+            `SELECT id_usuario, nombre, apellido, correo, estado
+             FROM usuarios
+             WHERE correo = $1`,
             [correo]
         );
 
         if (usuarioResultado.rows.length === 0) {
-            return res.json({
-                mensaje: "Si el correo se encuentra registrado, se enviará un código de recuperación"
+            return res.status(404).json({
+                mensaje: "No existe un usuario registrado con ese correo"
             });
         }
 
         const usuario = usuarioResultado.rows[0];
+
+        if (usuario.estado === false) {
+            return res.status(403).json({
+                mensaje: "El usuario se encuentra inactivo"
+            });
+        }
+
         const codigo = generarCodigoRecuperacion();
 
-        const fechaExpiracion = await pool.query(
-            `SELECT NOW() + INTERVAL '15 minutes' AS fecha_expiracion`
-        );
+        const fechaExpiracion = new Date();
+        fechaExpiracion.setMinutes(fechaExpiracion.getMinutes() + 15);
 
-        await pool.query(
+        await client.query("BEGIN");
+
+        await client.query(
             `UPDATE recuperacion_claves
              SET usado = TRUE
              WHERE id_usuario = $1
@@ -290,7 +302,7 @@ const solicitarRecuperacionClave = async (req, res) => {
             [usuario.id_usuario]
         );
 
-        await pool.query(
+        await client.query(
             `INSERT INTO recuperacion_claves
             (id_usuario, correo, codigo, usado, fecha_expiracion)
             VALUES ($1, $2, $3, FALSE, $4)`,
@@ -298,23 +310,34 @@ const solicitarRecuperacionClave = async (req, res) => {
                 usuario.id_usuario,
                 correo,
                 codigo,
-                fechaExpiracion.rows[0].fecha_expiracion
+                fechaExpiracion
             ]
         );
+
+        await client.query("COMMIT");
 
         await enviarCorreoRecuperacion(correo, codigo);
 
         res.json({
-            mensaje: "Si el correo se encuentra registrado, se enviará un código de recuperación"
+            mensaje: "Código de recuperación enviado al correo"
         });
 
     } catch (error) {
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Error al hacer rollback:", rollbackError.message);
+        }
+
         console.error("Error al solicitar recuperación de clave:", error);
 
         res.status(500).json({
             mensaje: "Error al solicitar recuperación de clave",
             error: error.message
         });
+
+    } finally {
+        client.release();
     }
 };
 
@@ -330,57 +353,65 @@ const restablecerClave = async (req, res) => {
 
         if (!correo || !codigo || !nueva_clave) {
             return res.status(400).json({
-                mensaje: "Correo, código y nueva clave son obligatorios"
+                mensaje: "Correo, código y nueva contraseña son obligatorios"
             });
         }
 
-        const regexClave = /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=.,;:¿?¡])[A-Za-z\d!@#$%^&*()_\-+=.,;:¿?¡]{6,}$/;
-
-            if (!regexClave.test(nueva_clave)) {
-                return res.status(400).json({
-            mensaje: "La nueva clave debe tener mínimo 6 caracteres, una mayúscula, un número y un carácter especial"
+        if (nueva_clave.length < 6) {
+            return res.status(400).json({
+                mensaje: "La nueva contraseña debe tener al menos 6 caracteres"
             });
         }
 
-        await client.query("BEGIN");
+        const usuarioResultado = await client.query(
+            `SELECT id_usuario, correo
+             FROM usuarios
+             WHERE correo = $1`,
+            [correo]
+        );
 
-        const recuperacionResultado = await client.query(
-            `SELECT rc.*, u.id_usuario
-             FROM recuperacion_claves rc
-             INNER JOIN usuarios u ON rc.id_usuario = u.id_usuario
-             WHERE rc.correo = $1
-             AND rc.codigo = $2
-             AND rc.usado = FALSE
-             AND rc.fecha_expiracion > NOW()
-             AND u.estado = TRUE
-             ORDER BY rc.fecha_registro DESC
+        if (usuarioResultado.rows.length === 0) {
+            return res.status(404).json({
+                mensaje: "Usuario no encontrado"
+            });
+        }
+
+        const usuario = usuarioResultado.rows[0];
+
+        const codigoResultado = await client.query(
+            `SELECT *
+             FROM recuperacion_claves
+             WHERE id_usuario = $1
+             AND correo = $2
+             AND codigo = $3
+             AND usado = FALSE
+             AND fecha_expiracion > NOW()
+             ORDER BY fecha_registro DESC
              LIMIT 1`,
             [
+                usuario.id_usuario,
                 correo,
                 codigo
             ]
         );
 
-        if (recuperacionResultado.rows.length === 0) {
-            await client.query("ROLLBACK");
-
+        if (codigoResultado.rows.length === 0) {
             return res.status(400).json({
-                mensaje: "Código inválido o expirado"
+                mensaje: "Código inválido, usado o expirado"
             });
         }
 
-        const recuperacion = recuperacionResultado.rows[0];
+        const nuevaClaveCifrada = await bcrypt.hash(nueva_clave, 10);
 
-        const salt = await bcrypt.genSalt(10);
-        const claveHash = await bcrypt.hash(nueva_clave, salt);
+        await client.query("BEGIN");
 
         await client.query(
             `UPDATE usuarios
              SET clave = $1
              WHERE id_usuario = $2`,
             [
-                claveHash,
-                recuperacion.id_usuario
+                nuevaClaveCifrada,
+                usuario.id_usuario
             ]
         );
 
@@ -388,19 +419,21 @@ const restablecerClave = async (req, res) => {
             `UPDATE recuperacion_claves
              SET usado = TRUE
              WHERE id_recuperacion = $1`,
-            [
-                recuperacion.id_recuperacion
-            ]
+            [codigoResultado.rows[0].id_recuperacion]
         );
 
         await client.query("COMMIT");
 
         res.json({
-            mensaje: "Clave restablecida correctamente"
+            mensaje: "Contraseña actualizada correctamente"
         });
 
     } catch (error) {
-        await client.query("ROLLBACK");
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("Error al hacer rollback:", rollbackError.message);
+        }
 
         console.error("Error al restablecer clave:", error);
 
@@ -415,9 +448,11 @@ const restablecerClave = async (req, res) => {
 };
 
 module.exports = {
-    listarUsuarios,
     registrarUsuario,
     loginUsuario,
-    solicitarRecuperacionClave,
+    listarUsuarios,
+    obtenerUsuarioPorId,
+    actualizarUsuario,
+    solicitarRecuperacion,
     restablecerClave
 };

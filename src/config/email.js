@@ -1,92 +1,100 @@
 const nodemailer = require("nodemailer");
 const dns = require("dns");
-require("dotenv").config();
 
-// Forzar prioridad IPv4 para evitar error ENETUNREACH con IPv6 en Render
 dns.setDefaultResultOrder("ipv4first");
 
-const crearTransporter = () => {
-    const emailHost = process.env.EMAIL_HOST || "smtp.gmail.com";
-    const emailPort = Number(process.env.EMAIL_PORT || 587);
-    const emailUser = process.env.EMAIL_USER;
-    const emailPass = process.env.EMAIL_PASS
-        ? process.env.EMAIL_PASS.replace(/\s/g, "")
-        : "";
+const EMAIL_HOST = process.env.EMAIL_HOST || "smtp.gmail.com";
+const EMAIL_PORT = Number(process.env.EMAIL_PORT || 465);
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+const EMAIL_FROM = process.env.EMAIL_FROM || `Spa TAMAR <${EMAIL_USER}>`;
 
-    return nodemailer.createTransport({
-        host: emailHost,
-        port: emailPort,
-        secure: emailPort === 465,
-        requireTLS: emailPort === 587,
-        family: 4,
-        auth: {
-            user: emailUser,
-            pass: emailPass
-        },
-        tls: {
-            rejectUnauthorized: false
-        }
-    });
-};
+const transporter = nodemailer.createTransport({
+    host: EMAIL_HOST,
+    port: EMAIL_PORT,
+    secure: EMAIL_PORT === 465,
+    auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+    },
+    family: 4,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+    tls: {
+        servername: EMAIL_HOST,
+        rejectUnauthorized: true
+    }
+});
 
 const verificarConfiguracionCorreo = async () => {
     try {
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-            console.log("Correo no configurado: faltan EMAIL_USER o EMAIL_PASS en .env");
+        if (!EMAIL_USER || !EMAIL_PASS) {
+            console.error("Faltan variables EMAIL_USER o EMAIL_PASS en Render");
             return false;
         }
 
-        const transporter = crearTransporter();
-
         await transporter.verify();
 
-        console.log("Servidor de correo configurado correctamente");
+        console.log("Configuracion de correo verificada correctamente");
         return true;
 
     } catch (error) {
-        console.error("Error al verificar configuración de correo:");
-        console.error(error.message);
+        console.error("Error en configuracion de correo:", error.message);
         return false;
     }
 };
 
 const enviarCorreoRecuperacion = async (correoDestino, codigo) => {
     try {
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-            console.log("Código de recuperación generado:", codigo);
-            console.log("No se configuró EMAIL_USER o EMAIL_PASS en .env");
-            return;
+        if (!correoDestino || !codigo) {
+            throw new Error("Correo destino y codigo son obligatorios");
         }
 
-        const transporter = crearTransporter();
-
-        const resultado = await transporter.sendMail({
-            from: process.env.EMAIL_FROM || `"Spa TAMAR" <${process.env.EMAIL_USER}>`,
+        const opcionesCorreo = {
+            from: EMAIL_FROM,
             to: correoDestino,
-            subject: "Recuperación de contraseña - Spa TAMAR",
+            subject: "Codigo de recuperacion de contraseña - Spa TAMAR",
             html: `
-                <div style="font-family: Arial, sans-serif; color: #333;">
-                    <h2>Recuperación de contraseña</h2>
-                    <p>Se solicitó recuperar la contraseña de tu cuenta en Spa TAMAR.</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #d9e6f2; border-radius: 12px; padding: 24px;">
+                    <h2 style="color: #0b3d78; text-align: center;">Spa TAMAR</h2>
+                    <h3 style="color: #0b3d78;">Recuperación de contraseña</h3>
+
+                    <p>Hola,</p>
+
+                    <p>Has solicitado recuperar tu contraseña en la aplicación móvil de Spa TAMAR.</p>
+
                     <p>Tu código de recuperación es:</p>
-                    <h1 style="letter-spacing: 4px; color: #7B2CBF;">${codigo}</h1>
-                    <p>Este código vence en 15 minutos.</p>
-                    <p>Si no solicitaste este cambio, puedes ignorar este mensaje.</p>
+
+                    <div style="text-align: center; margin: 24px 0;">
+                        <span style="font-size: 32px; font-weight: bold; color: #008b8b; letter-spacing: 4px;">
+                            ${codigo}
+                        </span>
+                    </div>
+
+                    <p>Este código tiene una validez limitada. Si no solicitaste este cambio, puedes ignorar este correo.</p>
+
+                    <p style="margin-top: 24px;">Atentamente,<br><strong>Spa TAMAR</strong></p>
                 </div>
             `
-        });
+        };
 
-        console.log("Correo de recuperación enviado a:", correoDestino);
-        console.log("ID del mensaje:", resultado.messageId);
+        const info = await transporter.sendMail(opcionesCorreo);
+
+        console.log("Correo de recuperacion enviado correctamente:", info.messageId);
+
+        return {
+            enviado: true,
+            messageId: info.messageId
+        };
 
     } catch (error) {
-        console.error("Error al enviar correo de recuperación:");
-        console.error(error.message);
+        console.error("Error al enviar correo de recuperacion:", error.message);
         throw error;
     }
 };
 
 module.exports = {
-    enviarCorreoRecuperacion,
-    verificarConfiguracionCorreo
+    verificarConfiguracionCorreo,
+    enviarCorreoRecuperacion
 };
