@@ -3,7 +3,14 @@ const pool = require("../config/db");
 const listarCitas = async (req, res) => {
     try {
         const resultado = await pool.query(
-            "SELECT * FROM citas ORDER BY fecha ASC, hora ASC"
+            `SELECT 
+                c.*,
+                COALESCE(c.precio_servicio, s.precio, 0) AS precio_servicio
+             FROM citas c
+             LEFT JOIN servicios s
+             ON c.id_servicio = s.id_servicio
+             OR LOWER(TRIM(c.servicio)) = LOWER(TRIM(s.nombre))
+             ORDER BY c.fecha ASC, c.hora ASC`
         );
 
         res.json({
@@ -27,7 +34,15 @@ const listarCitasPorFecha = async (req, res) => {
         const { fecha } = req.params;
 
         const resultado = await pool.query(
-            "SELECT * FROM citas WHERE fecha = $1 ORDER BY hora ASC",
+            `SELECT 
+                c.*,
+                COALESCE(c.precio_servicio, s.precio, 0) AS precio_servicio
+             FROM citas c
+             LEFT JOIN servicios s
+             ON c.id_servicio = s.id_servicio
+             OR LOWER(TRIM(c.servicio)) = LOWER(TRIM(s.nombre))
+             WHERE c.fecha = $1
+             ORDER BY c.hora ASC`,
             [fecha]
         );
 
@@ -53,9 +68,15 @@ const buscarCitasPorCliente = async (req, res) => {
         const { cliente } = req.params;
 
         const resultado = await pool.query(
-            `SELECT * FROM citas
-             WHERE LOWER(nombre_cliente) LIKE LOWER($1)
-             ORDER BY fecha ASC, hora ASC`,
+            `SELECT 
+                c.*,
+                COALESCE(c.precio_servicio, s.precio, 0) AS precio_servicio
+             FROM citas c
+             LEFT JOIN servicios s
+             ON c.id_servicio = s.id_servicio
+             OR LOWER(TRIM(c.servicio)) = LOWER(TRIM(s.nombre))
+             WHERE LOWER(c.nombre_cliente) LIKE LOWER($1)
+             ORDER BY c.fecha ASC, c.hora ASC`,
             [`%${cliente}%`]
         );
 
@@ -96,46 +117,64 @@ const registrarCita = async (req, res) => {
         }
 
         const cruce = await pool.query(
-        `SELECT 
-            id_cita,
-            nombre_cliente,
-            servicio,
-            fecha,
-            hora,
-            estado,
-            ABS(
+            `SELECT 
+                id_cita,
+                nombre_cliente,
+                servicio,
+                fecha,
+                hora,
+                estado,
+                ABS(
+                    EXTRACT(
+                        EPOCH FROM (
+                            (fecha + hora) - ($1::date + $2::time)
+                        )
+                    ) / 60
+                ) AS diferencia_minutos
+             FROM citas
+             WHERE fecha = $1
+             AND TRIM(LOWER(estado)) = 'en curso'
+             AND ABS(
                 EXTRACT(
                     EPOCH FROM (
                         (fecha + hora) - ($1::date + $2::time)
                     )
                 ) / 60
-            ) AS diferencia_minutos
-        FROM citas
-        WHERE fecha = $1
-        AND TRIM(LOWER(estado)) = 'en curso'
-        AND ABS(
-            EXTRACT(
-                EPOCH FROM (
-                    (fecha + hora) - ($1::date + $2::time)
-                )
-            ) / 60
-        ) <= 58
-        ORDER BY diferencia_minutos ASC
-        LIMIT 1`,
-        [fecha, hora]
-);
+             ) <= 58
+             ORDER BY diferencia_minutos ASC
+             LIMIT 1`,
+            [fecha, hora]
+        );
 
-if (cruce.rows.length > 0) {
-    return res.status(409).json({
-        mensaje: "No se puede agendar la cita porque existe otra cita activa",
-        cita_existente: cruce.rows[0]
-    });
-}
+        if (cruce.rows.length > 0) {
+            return res.status(409).json({
+                mensaje: "No se puede agendar la cita porque existe otra cita activa",
+                cita_existente: cruce.rows[0]
+            });
+        }
+
+        let precioServicio = 0;
+
+        const servicioResultado = await pool.query(
+            `SELECT precio
+             FROM servicios
+             WHERE id_servicio = $1
+             OR LOWER(TRIM(nombre)) = LOWER(TRIM($2))
+             LIMIT 1`,
+            [
+                id_servicio || 0,
+                servicio
+            ]
+        );
+
+        if (servicioResultado.rows.length > 0) {
+            precioServicio = Number(servicioResultado.rows[0].precio);
+        }
 
         const resultado = await pool.query(
             `INSERT INTO citas
-            (id_usuario, id_servicio, nombre_cliente, telefono, servicio, fecha, hora, estado, observaciones)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'En curso', $8)
+            (id_usuario, id_servicio, nombre_cliente, telefono, servicio, fecha, hora, estado, observaciones, precio_servicio)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'En curso', $8, $9)
             RETURNING *`,
             [
                 id_usuario || null,
@@ -145,7 +184,8 @@ if (cruce.rows.length > 0) {
                 servicio,
                 fecha,
                 hora,
-                observaciones || "Sin observaciones"
+                observaciones || "Sin observaciones",
+                precioServicio
             ]
         );
 
@@ -181,7 +221,7 @@ const obtenerServicioDeLaCita = async (client, cita) => {
 
     servicioResultado = await client.query(
         `SELECT * FROM servicios
-         WHERE LOWER(nombre) = LOWER($1)
+         WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1))
          LIMIT 1`,
         [cita.servicio]
     );
@@ -416,9 +456,15 @@ const listarCitasPorUsuario = async (req, res) => {
         const { id_usuario } = req.params;
 
         const resultado = await pool.query(
-            `SELECT * FROM citas
-             WHERE id_usuario = $1
-             ORDER BY fecha ASC, hora ASC`,
+            `SELECT 
+                c.*,
+                COALESCE(c.precio_servicio, s.precio, 0) AS precio_servicio
+             FROM citas c
+             LEFT JOIN servicios s
+             ON c.id_servicio = s.id_servicio
+             OR LOWER(TRIM(c.servicio)) = LOWER(TRIM(s.nombre))
+             WHERE c.id_usuario = $1
+             ORDER BY c.fecha ASC, c.hora ASC`,
             [id_usuario]
         );
 
